@@ -1,0 +1,6 @@
+name: ChaosOptimize
+version: 1.0.0
+main: com.chaossmp.chaosoptimize.ChaosOptimize
+api-version: '1.21'
+author: ChaosSMP
+description: Модуль оптимизации и комфорта игроков ChaosSMP (AutoPickup, SmartCleaner, CompactChat)
