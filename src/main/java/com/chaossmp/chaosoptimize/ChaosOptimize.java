@@ -4,12 +4,14 @@ import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.BlockDropItemEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.inventory.ItemStack;
@@ -17,14 +19,20 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.*;
 
-public final class ChaosOptimize extends JavaPlugin implements Listener {
+public final class ChaosOptimize extends JavaPlugin implements Listener, CommandExecutor {
 
     private final Map<UUID, String> lastPlayerMessages = new HashMap<>();
-    private final Map<UUID, Integer> lastMessageCounts = new HashMap<>();
+    private final Map<UUID, Long> lastMessageTimes = new HashMap<>();
 
     @Override
     public void onEnable() {
         Bukkit.getPluginManager().registerEvents(this, this);
+        
+        // Регистрация команд
+        if (getCommand("chaosoptimize") != null) {
+            getCommand("chaosoptimize").setExecutor(this);
+        }
+
         startSmartCleanerTask();
         getLogger().info("ChaosOptimize успешно запущен!");
     }
@@ -32,30 +40,11 @@ public final class ChaosOptimize extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         lastPlayerMessages.clear();
-        lastMessageCounts.clear();
+        lastMessageTimes.clear();
         getLogger().info("ChaosOptimize выключен.");
     }
 
-    // --- MODULE 1: AUTO PICKUP (Авто-збір у інвентар) ---
-
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onBlockDrop(BlockDropItemEvent event) {
-        Player player = event.getPlayer();
-        List<Item> items = event.getItems();
-
-        Iterator<Item> iterator = items.iterator();
-        while (iterator.hasNext()) {
-            Item itemEntity = iterator.next();
-            ItemStack stack = itemEntity.getItemStack();
-
-            HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(stack);
-            if (leftover.isEmpty()) {
-                iterator.remove();
-            } else {
-                itemEntity.setItemStack(leftover.get(0));
-            }
-        }
-    }
+    // --- MODULE 1: AUTO PICKUP (Только для мобов, блоки падают реально на землю) ---
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onEntityDeath(EntityDeathEvent event) {
@@ -81,34 +70,34 @@ public final class ChaosOptimize extends JavaPlugin implements Listener {
         }
     }
 
-    // --- MODULE 2: SMART CLEANER (Безпечне очищення сміття) ---
+    // --- MODULE 2: SMART CLEANER (Безопасная очистка мусора) ---
 
     private void startSmartCleanerTask() {
-        // Кожні 10 хвилин (12000 тиків)
+        // Каждые 10 минут (12000 тиков)
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             
             sendActionBarToAll("§e[ChaosOptimize] §fОчистка мусора через §c30 секунд§f!");
 
             Bukkit.getScheduler().runTaskLater(this, () -> {
                 sendActionBarToAll("§e[ChaosOptimize] §fОчистка мусора через §c10 секунд§f!");
-            }, 400L); // 20 секунд пізніше
+            }, 400L); // на 20 секунд позже
 
             Bukkit.getScheduler().runTaskLater(this, () -> {
                 int removed = executeClean();
                 sendActionBarToAll("§a[ChaosOptimize] §fОчистка завершена! Удалено предметов: §e" + removed);
-            }, 600L); // 30 секунд пізніше
+            }, 600L); // на 30 секунд позже
 
         }, 12000L, 12000L);
     }
 
-    private int executeClean() {
+    public int executeClean() {
         int count = 0;
         for (var world : Bukkit.getWorlds()) {
             for (Item item : world.getEntitiesByClass(Item.class)) {
                 ItemStack stack = item.getItemStack();
                 Material type = stack.getType();
 
-                // Не видаляємо цінні речі та кастомні предмети з назвами
+                // Не удаляем ценные вещи и кастомные предметы с названиями
                 if (isValuable(type) || (stack.hasItemMeta() && stack.getItemMeta().hasDisplayName())) {
                     continue;
                 }
@@ -134,23 +123,46 @@ public final class ChaosOptimize extends JavaPlugin implements Listener {
         }
     }
 
-    // --- MODULE 3: COMPACT CHAT (Групування однакових повідомлень) ---
+    // --- MODULE 3: ANTI-SPAM CHAT (Защита от спама и обхода мута) ---
 
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
-    public void onChat(AsyncPlayerChatEvent event) {
+    public void onAsyncPlayerChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
         UUID uuid = player.getUniqueId();
         String currentMsg = event.getMessage().trim();
 
         String lastMsg = lastPlayerMessages.get(uuid);
-        if (currentMsg.equalsIgnoreCase(lastMsg)) {
-            int count = lastMessageCounts.getOrDefault(uuid, 1) + 1;
-            lastMessageCounts.put(uuid, count);
+        long lastTime = lastMessageTimes.getOrDefault(uuid, 0L);
+        long currentTime = System.currentTimeMillis();
 
-            event.setFormat(player.getDisplayName() + "§7: §f" + currentMsg + " §8(x" + count + ")");
-        } else {
-            lastPlayerMessages.put(uuid, currentMsg);
-            lastMessageCounts.put(uuid, 1);
+        // Если игрок отправляет то же сообщение чаще чем раз в 4 секунды — блокируем
+        if (currentMsg.equalsIgnoreCase(lastMsg) && (currentTime - lastTime < 4000)) {
+            event.setCancelled(true);
+            player.sendMessage("§c[ChaosOptimize] §fНе спамь одинаковыми сообщениями!");
+            return;
         }
+
+        lastPlayerMessages.put(uuid, currentMsg);
+        lastMessageTimes.put(uuid, currentTime);
+    }
+
+    // --- MODULE 4: NEW FEATURE (Админ-команда для управления оптимизацией) ---
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!sender.hasPermission("chaosoptimize.admin")) {
+            sender.sendMessage("§cУ вас нет прав на выполнение этой команды.");
+            return true;
+        }
+
+        if (args.length > 0 && args[0].equalsIgnoreCase("clean")) {
+            int removed = executeClean();
+            sender.sendMessage("§a[ChaosOptimize] §fПринудительная очистка завершена. Удалено предметов: §e" + removed);
+            return true;
+        }
+
+        sender.sendMessage("§e=== ChaosOptimize Commands ===");
+        sender.sendMessage("§f/chaosoptimize clean §7- Принудительно очистить мусор на сервере");
+        return true;
     }
 }
