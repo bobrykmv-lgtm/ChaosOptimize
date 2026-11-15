@@ -1,6 +1,18 @@
 name: ChaosOptimize
-version: 1.0.0
+version: 1.1.0
 main: com.chaossmp.chaosoptimize.ChaosOptimize
 api-version: '1.21'
 author: ChaosSMP
-description: Модуль оптимизации и комфорта игроков ChaosSMP (AutoPickup, SmartCleaner, CompactChat)
+description: Модуль оптимизации и комфорта игроков ChaosSMP (MobAutoPickup, SmartCleaner, AntiSpam)
+
+commands:
+  chaosoptimize:
+    description: Главная команда управления плагином ChaosOptimize
+    usage: /chaosoptimize clean
+    permission: chaosoptimize.admin
+    permission-message: §cУ вас нет прав на выполнение этой команды.
+
+permissions:
+  chaosoptimize.admin:
+    description: Доступ к админ-командам плагіна ChaosOptimize
+    default: op
